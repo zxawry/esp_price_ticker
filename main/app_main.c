@@ -12,9 +12,13 @@
 #include "driver/i2c_master.h"
 #include "app_disp.h"
 
-static const char *TAG = "APP_MAIN";
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "nvs_flash.h"
 
-extern const uint8_t ASCII_FONT[][8];
+static const char *TAG = "app_main";
+
+extern esp_err_t wifi_init_sta(void);
 
 #define DISP_LCD_PIXEL_CLOCK_HZ    (400 * 1000)
 #define DISP_PIN_NUM_SDA           21
@@ -29,6 +33,9 @@ extern const uint8_t ASCII_FONT[][8];
 
 void app_main(void)
 {
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
     ESP_LOGI(TAG, "Initialise I2C bus");
     i2c_master_bus_handle_t bus_handle = NULL;
     i2c_master_bus_config_t bus_config = {
@@ -54,47 +61,26 @@ void app_main(void)
 
     ESP_ERROR_CHECK(i2c_disp_init(disp_handle));
     ESP_ERROR_CHECK(i2c_disp_power(disp_handle, true));
-
-    ESP_ERROR_CHECK(i2c_disp_invert(disp_handle, true));
-    vTaskDelay(2 * 1000 / portTICK_PERIOD_MS);
     ESP_ERROR_CHECK(i2c_disp_invert(disp_handle, false));
-
-    ESP_ERROR_CHECK(i2c_disp_fill(disp_handle, 0, 0, '!'));
-    vTaskDelay(2 * 1000 / portTICK_PERIOD_MS);
     ESP_ERROR_CHECK(i2c_disp_clear(disp_handle, 0, 0));
 
-    ESP_ERROR_CHECK(i2c_disp_fill(disp_handle, 4, 8, '@'));
-    vTaskDelay(2 * 1000 / portTICK_PERIOD_MS);
-    ESP_ERROR_CHECK(i2c_disp_clear(disp_handle, 5, 8));
-    vTaskDelay(2 * 1000 / portTICK_PERIOD_MS);
-    ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 6, 0, "Life is Pleasant", 16));
-    vTaskDelay(2 * 1000 / portTICK_PERIOD_MS);
-    ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 6, 0, "Life is Good", 16));
-    vTaskDelay(2 * 1000 / portTICK_PERIOD_MS);
-    ESP_ERROR_CHECK(i2c_disp_clear(disp_handle, 0, 0));
-
-    char mydata[128];
-    for (uint8_t i = 0; i < 96; i++) {
-        mydata[i] = i + 32;
+    ESP_LOGI(TAG, "Initialise NVS");
+    ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 0, 0, "Initialise NVS", 16));
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
-    mydata[96] = '\0';
+    ESP_ERROR_CHECK(ret);
 
-    ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 0, 0, mydata, 96));
-    vTaskDelay(2 * 1000 / portTICK_PERIOD_MS);
+    // uncomment if more wifi logs are needed
+    //if (CONFIG_LOG_MAXIMUM_LEVEL > CONFIG_LOG_DEFAULT_LEVEL) {
+        //esp_log_level_set("wifi", CONFIG_LOG_MAXIMUM_LEVEL);
+    //}
+
+    ESP_LOGI(TAG, "Initialise WiFi");
+    ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 0, 0, "Initialise WiFi", 16));
+    ESP_ERROR_CHECK(wifi_init_sta());
+
     ESP_ERROR_CHECK(i2c_disp_clear(disp_handle, 0, 0));
-
-    char number[16];
-    uint32_t counter = 0x1337c0d3;
-
-    while (1) {
-        snprintf(number, 16, "%lx", counter);
-        ESP_LOGI(TAG, "counter=0x%x", counter);
-        ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 0, 0, "counter:", 8));
-        ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 2, 0, number, 16));
-        counter >>= 8;
-        if (counter == 0x00) {
-            counter = 0x1337c0d3;
-        }
-        vTaskDelay(1 * 1000 / portTICK_PERIOD_MS);
-    }
 }
