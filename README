@@ -1,0 +1,24 @@
+Title:
+
+    esp_price_ticker
+
+Brief:
+
+    This project implements a currency price ticker using an ESP32 module. The
+    price information is fetched from a remote API and displayed on a display
+    module, regularly.
+
+Notes:
+
+    2026-06-12: I decided to begin the project by adding basic support for an
+    SSD1306 display module via I2C bus. The `esp-idf` already has a driver for
+    this module in `esp_lcd` component, but the driver seems too overkill for my
+    use case, where I only need to display ASCII characters and no scrolling
+    stuffs are required. Hence, I decided to write yet another SSD1306 driver.
+    This home-made driver is basically adapted from the `i2c_eeprom` component
+    from one of the `esp-idf` example projects and worked upon to finally
+    support the SSD1306 module. Notably, the driver divides the screen into a
+    16x8 grid where each cell can display an 8x8 pixels bitmap. There is also an
+    internal buffer that retains all the ASCII character written on the screen
+    so far. This `screen_buffer` can be used to optimise write operations by
+    eliminating unnecessary rewrites.
