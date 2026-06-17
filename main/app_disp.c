@@ -237,3 +237,29 @@ esp_err_t i2c_disp_write(i2c_disp_handle_t disp_handle, uint8_t row, uint8_t col
 
     return ESP_OK;
 }
+
+esp_err_t i2c_disp_highlight(i2c_disp_handle_t disp_handle, bool on_off, uint8_t row, uint8_t col, size_t size)
+{
+    ESP_RETURN_ON_FALSE((row < 8 && col < 16), ESP_ERR_INVALID_ARG, TAG, "invalid row or column range");
+
+    ESP_RETURN_ON_ERROR(i2c_disp_set_row_col(disp_handle, row, col), TAG,
+            "disp_handle set row and column failed");
+
+    uint8_t mask = on_off ? 0xff : 0x00;
+
+    uint8_t start = (row * 16) + col;
+    uint8_t end = ((start + size) > 128) ? 128 : start + size;
+
+    for (uint8_t i = start; i < end; i++) {
+        char ch = disp_handle->screen_buffer[i];
+        const uint8_t *temp = ASCII_FONT[ch - 32];
+        uint8_t data[8];
+        for (uint8_t j = 0; j < 8; j++) {
+            data[j] = temp[j] ^ mask;
+        }
+        ESP_RETURN_ON_ERROR(i2c_disp_send_data(disp_handle, -1, data, 8), TAG,
+                "disp_handle send data failed");
+    }
+
+    return ESP_OK;
+}

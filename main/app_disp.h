@@ -101,6 +101,18 @@ esp_err_t i2c_disp_fill(i2c_disp_handle_t disp_handle, uint8_t row, uint8_t col,
  */
 esp_err_t i2c_disp_write(i2c_disp_handle_t disp_handle, uint8_t row, uint8_t col, const char *str, size_t size);
 
+/**
+ * @brief Highlight blocks on Display
+ *
+ * @param[in] disp_handle Display handle
+ * @param[in] on_off True to highlight blocks
+ * @param[in] row Position of row to start highlighting
+ * @param[in] col Position of column to start highlighting
+ * @param[in] size How many bloks to highlight
+ * @return ESP_OK: Highlight success. Otherwise failed, please check I2C function fail reason.
+ */
+esp_err_t i2c_disp_highlight(i2c_disp_handle_t disp_handle, bool on_off, uint8_t row, uint8_t col, size_t size);
+
 #ifdef __cplusplus
 }
 #endif
