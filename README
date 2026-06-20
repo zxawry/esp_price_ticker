@@ -10,6 +10,34 @@ Brief:
 
 Notes:
 
+    2026-06-20: The button events are working more or less flawlessly. However,
+    in order to make it easier to iterate over markets indefinitely without the
+    need to keep track of any index or out of bound checks, I decided to convert
+    the markets list into a circular doubly linked list. This way markets can be
+    traversed back and forth and looped over so smoothly, which makes the
+    implementation of previous and next button handlers way easier. Speaking of
+    button handlers, I have used the display task to receive all button events
+    and act upon them by holding a context of the current state of the system
+    and this made the task a big pile of if conditions and switch cases which I
+    do not really like. Moreover, the settings menu only supports a few markets
+    as much as the screen fits. So, I also need to implement an automatic
+    pagination for the menu as well.
+
+    2026-06-20: Having verified the correct operation of the HTTP module and
+    simple sequential display of markets, It was time to start adding control
+    buttons. So, I designed 4 buttons to control how markets are displayed.
+    Normally, two buttons are required to display previous or next market on the
+    screen. A third button is also needed to switch between settings menu and
+    normal markets display. Lastly, the fourth button can be used to pause
+    market iteration while in normal mode and enable or disable a market to be
+    tracked on the settings menu. Well, the tricky part about buttons is how to
+    debounce them. Doing some test, it was found that if a negative edge
+    interrupt is used for GPIOs and sending key press events only if the GPIO
+    level is zero, and on the other side if the receiving task also checks the
+    GPIO for level zero upon event reception, then many of the button glitches
+    are normally filtered out without the need for complex delay-based
+    debouncing methods.
+
     2026-06-15: As follow-up, I came up with writing an HTTP app module to fetch
     trades and price informations of currency markets from a remote API. I have
     used a linked list to store information for each market. This could be done

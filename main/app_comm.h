@@ -33,6 +33,8 @@ struct market_t {
     char symbol[16];
     char last_price[16];
     char last_update[16];
+    bool is_enabled;
+    struct market_t *prev;
     struct market_t *next;
 };
 
