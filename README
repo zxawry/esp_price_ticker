@@ -10,25 +10,33 @@ Brief:
 
 Notes:
 
+    2026-06-21: In pursuit of simplifying the display task, I came up with the
+    idea to break the task into two separate tasks, one of which handles events
+    when the app is showing settings menu and the other task handles events
+    while the app is in markets display mode. At any point in time in only one
+    task is running, depending on the mode. Once the MENU button is pressed the
+    running task notifies the waiting task while putting itself in waiting state
+    till receiving a notification from the awakened task.
+
     2026-06-20: The button events are working more or less flawlessly. However,
     in order to make it easier to iterate over markets indefinitely without the
-    need to keep track of any index or out of bound checks, I decided to convert
-    the markets list into a circular doubly linked list. This way markets can be
-    traversed back and forth and looped over so smoothly, which makes the
-    implementation of previous and next button handlers way easier. Speaking of
-    button handlers, I have used the display task to receive all button events
-    and act upon them by holding a context of the current state of the system
-    and this made the task a big pile of if conditions and switch cases which I
-    do not really like. Moreover, the settings menu only supports a few markets
-    as much as the screen fits. So, I also need to implement an automatic
-    pagination for the menu as well.
+    need to keep track of any index or out of bound checks, I decided to
+    convert the markets list into a circular doubly linked list. This way
+    markets can be traversed back and forth and looped over so smoothly, which
+    makes the implementation of previous and next button handlers way easier.
+    Speaking of button handlers, I have used the display task to receive all
+    button events and act upon them by holding a context of the current state
+    of the system and this made the task a big pile of if conditions and switch
+    cases which I do not really like. Moreover, the settings menu only supports
+    a few markets as much as the screen fits. So, I also need to implement an
+    automatic pagination for the menu as well.
 
     2026-06-20: Having verified the correct operation of the HTTP module and
     simple sequential display of markets, It was time to start adding control
     buttons. So, I designed 4 buttons to control how markets are displayed.
-    Normally, two buttons are required to display previous or next market on the
-    screen. A third button is also needed to switch between settings menu and
-    normal markets display. Lastly, the fourth button can be used to pause
+    Normally, two buttons are required to display previous or next market on
+    the screen. A third button is also needed to switch between settings menu
+    and normal markets display. Lastly, the fourth button can be used to pause
     market iteration while in normal mode and enable or disable a market to be
     tracked on the settings menu. Well, the tricky part about buttons is how to
     debounce them. Doing some test, it was found that if a negative edge
@@ -38,25 +46,25 @@ Notes:
     are normally filtered out without the need for complex delay-based
     debouncing methods.
 
-    2026-06-15: As follow-up, I came up with writing an HTTP app module to fetch
-    trades and price informations of currency markets from a remote API. I have
-    used a linked list to store information for each market. This could be done
-    with arrays to but a linked list seemed easier to iterate in a loop and more
-    dynamic, in case there is a need to add or remove markets on the fly.
-    Currently, one task iterates over the markets and updates the price of each
-    market, while a second task displays the fetched data of each market. Since,
-    there is a single writer and a single reader for markets, I don't think any
-    access control is required for now.
+    2026-06-15: As follow-up, I came up with writing an HTTP app module to
+    fetch trades and price informations of currency markets from a remote API.
+    I have used a linked list to store information for each market. This could
+    be done with arrays to but a linked list seemed easier to iterate in a loop
+    and more dynamic, in case there is a need to add or remove markets on the
+    fly. Currently, one task iterates over the markets and updates the price of
+    each market, while a second task displays the fetched data of each market.
+    Since, there is a single writer and a single reader for markets, I don't
+    think any access control is required for now.
 
     2026-06-12: I decided to begin the project by adding basic support for an
     SSD1306 display module via I2C bus. The `esp-idf` already has a driver for
-    this module in `esp_lcd` component, but the driver seems too overkill for my
-    use case, where I only need to display ASCII characters and no scrolling
+    this module in `esp_lcd` component, but the driver seems too overkill for
+    my use case, where I only need to display ASCII characters and no scrolling
     stuffs are required. Hence, I decided to write yet another SSD1306 driver.
     This home-made driver is basically adapted from the `i2c_eeprom` component
     from one of the `esp-idf` example projects and worked upon to finally
     support the SSD1306 module. Notably, the driver divides the screen into a
-    16x8 grid where each cell can display an 8x8 pixels bitmap. There is also an
-    internal buffer that retains all the ASCII character written on the screen
-    so far. This `screen_buffer` can be used to optimise write operations by
-    eliminating unnecessary rewrites.
+    16x8 grid where each cell can display an 8x8 pixels bitmap. There is also
+    an internal buffer that retains all the ASCII character written on the
+    screen so far. This `screen_buffer` can be used to optimise write
+    operations by eliminating unnecessary rewrites.

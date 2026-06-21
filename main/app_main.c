@@ -23,133 +23,80 @@
 #include "freertos/queue.h"
 #include "driver/gpio.h"
 
-#define GPIO_INPUT_IO_0     (16) //CONFIG_GPIO_INPUT_0
-#define GPIO_INPUT_IO_1     (17) //CONFIG_GPIO_INPUT_1
-#define GPIO_INPUT_IO_2     (18) //CONFIG_GPIO_INPUT_2
-#define GPIO_INPUT_IO_3     (19) //CONFIG_GPIO_INPUT_3
-#define GPIO_INPUT_PIN_SEL  ((1ULL<<GPIO_INPUT_IO_0) | (1ULL<<GPIO_INPUT_IO_1) | (1ULL<<GPIO_INPUT_IO_2) | (1ULL<<GPIO_INPUT_IO_3))
-#define ESP_INTR_FLAG_DEFAULT 0
-
 static const char *TAG = "app_main";
-
-extern const uint8_t ASCII_FONT[][8];
 
 extern esp_err_t wifi_init_sta(void);
 
 extern esp_err_t http_request(market_handle_t market_handle);
 
-const char *MARKETS[] = { "BTCUSDT", "XMRUSDT", "LTCUSDT", "USDTIRT" };
+extern esp_err_t market_new(market_handle_t *market_handle, const char *symbol);
+extern market_t *market_search(market_t *market, bool forward);
+extern void stat_print(i2c_disp_handle_t disp_handle, market_t *market, bool first_run);
+extern void stat_empty(i2c_disp_handle_t disp_handle, bool first_run);
+extern void stat_toggle(i2c_disp_handle_t disp_handle, bool is_paused);
+extern void menu_print(i2c_disp_handle_t disp_handle, market_t *market, uint8_t count, uint8_t selector, bool first_run);
+extern void menu_backward(i2c_disp_handle_t disp_handle, market_t *market, uint8_t count, uint8_t selector);
+extern void menu_forward(i2c_disp_handle_t disp_handle, market_t *market, uint8_t count, uint8_t selector);
+extern void menu_toggle(i2c_disp_handle_t disp_handle, market_t *market, uint8_t selector);
+
+#define MARKETS_COUNT (11)
+
+const char *MARKETS[] = {
+    "BTCUSDT", "XMRUSDT", "LTCUSDT", "ETHUSDT", "ZECUSDT", "ETCUSDT", "TONUSDT", "XRPUSDT", "BATUSDT", "DAIUSDT", "USDTIRT",
+};
 
 typedef struct {
     market_handle_t market_head;
     market_handle_t market_tail;
-    uint8_t selector;
-    bool show_menu;
-    bool is_paused;
-    QueueHandle_t cmd_event_queue;
+    uint8_t market_count;
     QueueHandle_t key_event_queue;
+    TaskHandle_t stat_task_handle;
+    TaskHandle_t menu_task_handle;
     i2c_disp_handle_t disp_handle;
 } app_context_t;
-
-typedef enum {
-    KEY_MENU_PRESS,
-    KEY_PREV_PRESS,
-    KEY_NEXT_PRESS,
-    KEY_FLOW_PRESS,
-} key_event_t;
-
-typedef enum {
-    CMD_MENU_MARKET,
-    CMD_PREV_MARKET,
-    CMD_NEXT_MARKET,
-    CMD_FLOW_MARKET,
-} cmd_event_t;
 
 static void IRAM_ATTR gpio_isr_handler(void *arg)
 {
     app_context_t *context = (app_context_t *)arg;
-    if (gpio_get_level(GPIO_INPUT_IO_0) == 0) {
-        key_event_t evt = KEY_MENU_PRESS;
+    if (gpio_get_level(GPIO_KEY_MENU) == 0) {
+        key_event_t evt = KEY_MENU;
         xQueueSendFromISR(context->key_event_queue, &evt, NULL);
     }
-    if (gpio_get_level(GPIO_INPUT_IO_1) == 0) {
-        key_event_t evt = KEY_PREV_PRESS;
+    if (gpio_get_level(GPIO_KEY_PREV) == 0) {
+        key_event_t evt = KEY_PREV;
         xQueueSendFromISR(context->key_event_queue, &evt, NULL);
     }
-    if (gpio_get_level(GPIO_INPUT_IO_2) == 0) {
-        key_event_t evt = KEY_NEXT_PRESS;
+    if (gpio_get_level(GPIO_KEY_NEXT) == 0) {
+        key_event_t evt = KEY_NEXT;
         xQueueSendFromISR(context->key_event_queue, &evt, NULL);
     }
-    if (gpio_get_level(GPIO_INPUT_IO_3) == 0) {
-        key_event_t evt = KEY_FLOW_PRESS;
+    if (gpio_get_level(GPIO_KEY_FLOW) == 0) {
+        key_event_t evt = KEY_FLOW;
         xQueueSendFromISR(context->key_event_queue, &evt, NULL);
     }
 }
 
-void gpio_get_task(void *pvParameters)
+static void http_task(void *pvParameters)
 {
     app_context_t *context = (app_context_t *)pvParameters;
-
-    while (1) {
-        key_event_t evt;
-        if (xQueueReceive(context->key_event_queue, &evt, portMAX_DELAY) == pdTRUE) {
-            switch (evt) {
-                case KEY_MENU_PRESS:
-                    if (gpio_get_level(GPIO_INPUT_IO_0) == 0) {
-                        cmd_event_t cmd = CMD_MENU_MARKET;
-                        xQueueSend(context->cmd_event_queue, &cmd, 0);
-                    }
-                    break;
-                case KEY_PREV_PRESS:
-                    if (gpio_get_level(GPIO_INPUT_IO_1) == 0) {
-                        cmd_event_t cmd = CMD_PREV_MARKET;
-                        xQueueSend(context->cmd_event_queue, &cmd, 0);
-                    }
-                    break;
-                case KEY_NEXT_PRESS:
-                    if (gpio_get_level(GPIO_INPUT_IO_2) == 0) {
-                        cmd_event_t cmd = CMD_NEXT_MARKET;
-                        xQueueSend(context->cmd_event_queue, &cmd, 0);
-                    }
-                    break;
-                case KEY_FLOW_PRESS:
-                    if (gpio_get_level(GPIO_INPUT_IO_3) == 0) {
-                        cmd_event_t cmd = CMD_FLOW_MARKET;
-                        xQueueSend(context->cmd_event_queue, &cmd, 0);
-                    }
-                    break;
-                default:
-                    ESP_LOGE(TAG, "Invalid key event");
-                    break;
-            }
-        }
-    }
-    vTaskDelete(NULL);
-}
-
-void http_get_task(void *pvParameters)
-{
-    app_context_t *context = (app_context_t *)pvParameters;
-
-    // iterate markets
     market_t *market = context->market_head;
+
     while (1) {
         if (market->is_enabled) {
             esp_err_t err = http_request(market);
             if (err == ESP_OK) {
-                ESP_LOGI(TAG, "symbol = %s", market->symbol);
-                ESP_LOGI(TAG, "last_price = %s", market->last_price);
-                ESP_LOGI(TAG, "last_update = %s", market->last_update);
+                ESP_LOGI(TAG, "http: %s = %s @ %s",
+                        market->symbol, market->last_price, market->last_update);
             }
         } else { // market is disabled
-            ESP_LOGI(TAG, "%s is disabled, skipping", market->symbol);
+            ESP_LOGI(TAG, "http: %s = %d", market->symbol, market->is_enabled);
         }
         market = market->next;
 
         // check if a full iteration is complete
         if (market == context->market_head) {
             // wait longer to avoid rate limits
-            ESP_LOGI(TAG, "paused for rate limits");
+            ESP_LOGI(TAG, "http: suspend");
             vTaskDelay(60 * 1000 / portTICK_PERIOD_MS);
         } else {
             vTaskDelay(1 * 1000 / portTICK_PERIOD_MS);
@@ -158,171 +105,128 @@ void http_get_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
-static market_t *market_search(market_t *market, bool forward)
-{
-    market_t *market_head = market;
-    do {
-        market = forward ? market->next : market->prev;
-        if (market->is_enabled) {
-            return market;
-        }
-    } while (market != market_head);
-
-    return NULL;
-}
-
-static esp_err_t stat_print(i2c_disp_handle_t disp_handle, market_t *market, bool clear)
-{
-    if (market == NULL) {
-        ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 0, 0, "No Valid Markets", clear ? 128 : 16));
-    } else {
-        ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 0, 0, market->symbol, clear ? 128 : 16));
-        ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 2, 0, *market->last_price ? market->last_price : "NaN", 16));
-        ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 4, 0, *market->last_update ? market->last_update : "NaN", 16));
-    }
-    return ESP_OK;
-}
-
-static esp_err_t menu_print(i2c_disp_handle_t disp_handle, market_t *market, bool clear)
-{
-    ESP_ERROR_CHECK(i2c_disp_write(disp_handle, 0, 0, "Choose Markets:", clear ? 128: 16));
-
-    uint8_t row = 2; // MARKETS_LIST_OFFSET
-    market_t *market_head = market;
-    do {
-        char status[5] = { '[', market->is_enabled ? '*' : ' ', ']', ' ', '\0' };
-        ESP_ERROR_CHECK(i2c_disp_write(disp_handle, row, 0, status, 4));
-        ESP_ERROR_CHECK(i2c_disp_write(disp_handle, row, 4, market->symbol, 12));
-        market = market->next;
-        row++;
-    } while (market != market_head);
-    ESP_ERROR_CHECK(i2c_disp_highlight(disp_handle, true, 2, 0, 16));
-
-    return ESP_OK;
-}
-
-static esp_err_t menu_select(i2c_disp_handle_t disp_handle, market_t *market, uint8_t selector, bool next)
-{
-    ESP_ERROR_CHECK(i2c_disp_highlight(disp_handle, false, selector, 0, 16));
-    selector = next ?
-        ((selector == 6) ? 2 : selector + 1): // next
-        ((selector == 2) ? 6 : selector - 1); // prev
-    ESP_ERROR_CHECK(i2c_disp_highlight(disp_handle, true, selector, 0, 16));
-
-    return ESP_OK;
-}
-
-static esp_err_t menu_toggle(i2c_disp_handle_t disp_handle, market_t *market, uint8_t selector)
-{
-    ESP_ERROR_CHECK(i2c_disp_write(disp_handle, selector, 1, market->is_enabled ? "*" : " ", 1));
-    ESP_ERROR_CHECK(i2c_disp_highlight(disp_handle, true, selector, 1, 1));
-    return ESP_OK;
-}
-
-void disp_put_task(void *pvParameters)
+static void stat_task(void *pvParameters)
 {
     app_context_t *context = (app_context_t *)pvParameters;
     market_t *market = context->market_head;
 
-    ESP_ERROR_CHECK(i2c_disp_write(context->disp_handle, 0, 0, "Fetching Markets", 16));
+    // don't fret, this just means
+    // we have no enabled markets
+    bool is_zombie = false;
+    bool is_paused = false;
 
     while (1) {
-        cmd_event_t cmd;
-        if (xQueueReceive(context->cmd_event_queue, &cmd, pdMS_TO_TICKS(2 * 1000)) == pdTRUE) {
-            switch (cmd) {
-                case CMD_MENU_MARKET:
-                    context->show_menu = !context->show_menu;
-                    if (context->show_menu) {
-                        market = context->market_head; // reset iterator
-                        ESP_ERROR_CHECK(menu_print(context->disp_handle, market, true));
-                        context->selector = 2;
-                    } else { // show stat
-                        market = market_search(market, true);
-                        ESP_ERROR_CHECK(stat_print(context->disp_handle, market, true));
-                        if (market == NULL) { market = context->market_head; };
-                        context->selector = 0;
-                    }
-                    break;
-                case CMD_PREV_MARKET:
-                    if (context->show_menu) {
-                        // select previous market
-                        market = market->prev;
-                        ESP_ERROR_CHECK(menu_select(context->disp_handle, market, context->selector, false));
-                        context->selector = (context->selector == 2) ? 6 : context->selector - 1;
-                    } else {
-                        market = market_search(market, false);
-                        ESP_ERROR_CHECK(stat_print(context->disp_handle, market, false));
-                        if (market == NULL) { market = context->market_head; };
-                    }
-                    break;
-                case CMD_NEXT_MARKET:
-                    if (context->show_menu) {
-                        // select next market
-                        market = market->next;
-                        ESP_ERROR_CHECK(menu_select(context->disp_handle, market, context->selector, true));
-                        context->selector = (context->selector == 6) ? 2 : context->selector + 1;
-                    } else {
-                        market = market_search(market, true);
-                        ESP_ERROR_CHECK(stat_print(context->disp_handle, market, false));
-                        if (market == NULL) { market = context->market_head; };
-                    }
-                    break;
-                case CMD_FLOW_MARKET:
-                    if (context->show_menu) {
-                        // toggle current market
-                        market->is_enabled = !market->is_enabled;
-                        ESP_ERROR_CHECK(menu_toggle(context->disp_handle, market, context->selector));
-                        ESP_LOGI(TAG, "%s is_enabled = %d", market->symbol, market->is_enabled);
-                    } else {
-                        context->is_paused = !context->is_paused;
-                        if (context->is_paused) {
-                            ESP_ERROR_CHECK(i2c_disp_write(context->disp_handle, 7, 15, "P", 1));
-                        } else {
-                            ESP_ERROR_CHECK(i2c_disp_write(context->disp_handle, 7, 15, " ", 1));
-                        }
-                        ESP_LOGI(TAG, "is_paused=%d", context->is_paused);
-                    }
-                    break;
-                default:
-                    ESP_LOGE(TAG, "Invalid cmd event");
-                    break;
-            }
-        } else { // event timeout
-            if (!context->show_menu) { // we are showing markets.
-                if (!context->is_paused) {
-                    market = market_search(market, true);
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        // switched to stat
+        ESP_LOGI(TAG, "stat: resumed");
+        // search from the tail so we show head if it's enabled too
+        market = market_search(context->market_tail, true);
+        if (market == NULL) {
+            is_zombie = true;
+            stat_empty(context->disp_handle, true);
+            ESP_LOGI(TAG, "stat: zombie");
+        } else {
+            is_zombie = false;
+            stat_print(context->disp_handle, market, true);
+            // restore previous pause state on the display
+            stat_toggle(context->disp_handle, is_paused);
+            ESP_LOGI(TAG, "stat: %s = %d", market->symbol, market->is_enabled);
+        }
+
+        key_event_t evt;
+        while (xQueueReceive(context->key_event_queue, &evt, pdMS_TO_TICKS(2 * 1000)) || pdTRUE) {
+            if (evt == KEY_MENU && gpio_get_level(GPIO_KEY_MENU) == 0) {
+                ESP_LOGI(TAG, "stat: suspend");
+                xTaskNotifyGive(context->menu_task_handle);
+                goto wait_for_stat;
+            } else if (evt == KEY_PREV && gpio_get_level(GPIO_KEY_PREV) == 0) {
+                if (!is_zombie) {
+                    market = market_search(market, false);
+                    stat_print(context->disp_handle, market, false);
+                    ESP_LOGI(TAG, "stat: %s = %d", market->symbol, market->is_enabled);
+                } else {
+                    stat_empty(context->disp_handle, false);
+                    ESP_LOGI(TAG, "stat: zombie");
                 }
-                ESP_ERROR_CHECK(stat_print(context->disp_handle, market, false));
-                if (market == NULL) { market = context->market_head; };
+            } else if (evt == KEY_NEXT && gpio_get_level(GPIO_KEY_NEXT) == 0) {
+                if (!is_zombie) {
+                    market = market_search(market, true);
+                    stat_print(context->disp_handle, market, false);
+                    ESP_LOGI(TAG, "stat: %s = %d", market->symbol, market->is_enabled);
+                } else {
+                    stat_empty(context->disp_handle, false);
+                    ESP_LOGI(TAG, "stat: zombie");
+                }
+            } else if (evt == KEY_FLOW && gpio_get_level(GPIO_KEY_FLOW) == 0) {
+                is_paused = !is_paused;
+                stat_toggle(context->disp_handle, is_paused);
+                ESP_LOGI(TAG, "stat: is_paused %d", is_paused);
+            } else {
+                //ESP_LOGI(TAG, "stat: timeout");
+                if (!is_zombie) {
+                    if (!is_paused) {
+                        market = market_search(market, true);
+                    }
+                    stat_print(context->disp_handle, market, false);
+                    ESP_LOGI(TAG, "stat: %s = %d", market->symbol, market->is_enabled);
+                } else { // we are zombie
+                    stat_empty(context->disp_handle, false);
+                    ESP_LOGI(TAG, "stat: zombie");
+                }
             }
         }
+wait_for_stat:
     }
     vTaskDelete(NULL);
 }
 
-static esp_err_t market_new(market_handle_t *market_handle, const char *symbol)
+static void menu_task(void *pvParameters)
 {
-    esp_err_t ret = ESP_OK;
+    app_context_t *context = (app_context_t *)pvParameters;
+    market_t *market = context->market_head;
 
-    market_handle_t out_handle;
-    out_handle = (market_handle_t)calloc(1, sizeof(*out_handle));
-    ESP_GOTO_ON_FALSE(out_handle, ESP_ERR_NO_MEM, err, TAG, "No memory for for %s", symbol);
+    uint8_t selector = 0;
 
-    memset(out_handle->symbol, 0, 16);
-    strcpy(out_handle->symbol, symbol);
-    memset(out_handle->last_price, 0, 16);
-    memset(out_handle->last_update, 0, 16);
-    out_handle->is_enabled = true;
-    out_handle->prev = NULL;
-    out_handle->next = NULL;
+    while (1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        // switched to menu
+        ESP_LOGI(TAG, "menu: resumed");
+        market = context->market_head;
+        selector = 0;
+        menu_print(context->disp_handle, market, context->market_count, selector, true);
+        do {
+            ESP_LOGI(TAG, "menu: %s = %d", market->symbol, market->is_enabled);
+            market = market->next;
+        } while (market != context->market_head);
 
-    *market_handle = out_handle;
-
-    return ESP_OK;
-
-err:
-    free(out_handle);
-    return ret;
+        key_event_t evt;
+        while (xQueueReceive(context->key_event_queue, &evt, pdMS_TO_TICKS(2 * 1000)) || pdTRUE) {
+            if (evt == KEY_MENU && gpio_get_level(GPIO_KEY_MENU) == 0) {
+                ESP_LOGI(TAG, "menu: suspend");
+                xTaskNotifyGive(context->stat_task_handle);
+                goto wait_for_menu;
+            } else if (evt == KEY_PREV && gpio_get_level(GPIO_KEY_PREV) == 0) {
+                market = market->prev;
+                selector = (selector == 0) ? context->market_count - 1 : selector - 1;
+                ESP_LOGI(TAG, "menu: selector = %d", selector);
+                menu_backward(context->disp_handle, market, context->market_count, selector);
+                ESP_LOGI(TAG, "menu: %s = %d", market->symbol, market->is_enabled);
+            } else if (evt == KEY_NEXT && gpio_get_level(GPIO_KEY_NEXT) == 0) {
+                market = market->next;
+                selector = (selector == context->market_count - 1) ? 0 : selector + 1;
+                menu_forward(context->disp_handle, market, context->market_count, selector);
+                ESP_LOGI(TAG, "menu: %s = %d", market->symbol, market->is_enabled);
+            } else if (evt == KEY_FLOW && gpio_get_level(GPIO_KEY_FLOW) == 0) {
+                market->is_enabled = !market->is_enabled;
+                menu_toggle(context->disp_handle, market, selector);
+                ESP_LOGI(TAG, "menu: %s = %d", market->symbol, market->is_enabled);
+            } else {
+                //ESP_LOGI(TAG, "menu: timeout");
+            }
+        }
+wait_for_menu:
+    }
+    vTaskDelete(NULL);
 }
 
 static esp_err_t app_init(app_context_t *context)
@@ -382,11 +286,11 @@ static esp_err_t app_init(app_context_t *context)
     ESP_LOGI(TAG, "Initialise Markets");
     // create head item for markets list in context
     market_handle_t market_temp = NULL;
-    ESP_ERROR_CHECK(market_new(&market_temp, "ETHUSDT"));
+    ESP_ERROR_CHECK(market_new(&market_temp, MARKETS[0]));
     context->market_head = market_temp;
 
     market_handle_t market_prev = context->market_head;
-    for (uint8_t i = 0; i < 4; i++) {
+    for (uint8_t i = 1; i < MARKETS_COUNT; i++) {
         market_temp = NULL;
         ESP_ERROR_CHECK(market_new(&market_temp, MARKETS[i]));
 
@@ -395,28 +299,22 @@ static esp_err_t app_init(app_context_t *context)
         market_prev = market_temp;
     }
     context->market_tail = market_temp;
+    context->market_count = MARKETS_COUNT;
 
     // make the liked list circular
     context->market_head->prev = context->market_tail;
     context->market_tail->next = context->market_head;
 
-    context->selector = 0;
-    context->show_menu = false;
-    context->is_paused = false;
-
     ESP_LOGI(TAG, "Initialise GPIOs");
     gpio_config_t io_config = {
         .intr_type = GPIO_INTR_NEGEDGE, //interrupt of falling edge
         .mode = GPIO_MODE_INPUT, //set as input mode
-        .pin_bit_mask = GPIO_INPUT_PIN_SEL, //bit mask of the pins to set
+        .pin_bit_mask = GPIO_KEYS_MASK, //bit mask of the pins to set
         .pull_down_en = 0, //disable pull-down mode
         .pull_up_en = 1, //enable pull-up mode
     };
     gpio_config(&io_config);
 
-    //create a queue to handle cmd event from task
-    context->cmd_event_queue = xQueueCreate(16, sizeof(cmd_event_t));
-    ESP_RETURN_ON_FALSE(context->cmd_event_queue, ESP_ERR_NO_MEM, TAG, "no mem for cmd queue");
     //create a queue to handle key event from isr
     context->key_event_queue = xQueueCreate(16, sizeof(key_event_t));
     ESP_RETURN_ON_FALSE(context->key_event_queue, ESP_ERR_NO_MEM, TAG, "no mem for key queue");
@@ -424,10 +322,10 @@ static esp_err_t app_init(app_context_t *context)
     //install gpio isr service
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT));
     //hook isr handler for specific gpio pin
-    ESP_ERROR_CHECK(gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) context));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(GPIO_INPUT_IO_1, gpio_isr_handler, (void*) context));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(GPIO_INPUT_IO_2, gpio_isr_handler, (void*) context));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(GPIO_INPUT_IO_3, gpio_isr_handler, (void*) context));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(GPIO_KEY_MENU, gpio_isr_handler, (void*) context));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(GPIO_KEY_PREV, gpio_isr_handler, (void*) context));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(GPIO_KEY_NEXT, gpio_isr_handler, (void*) context));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(GPIO_KEY_FLOW, gpio_isr_handler, (void*) context));
 
     return ret;
 }
@@ -440,7 +338,9 @@ void app_main(void)
     ESP_ERROR_CHECK(app_init(&context));
 
     ESP_LOGI(TAG, "Create Tasks");
-    xTaskCreate(gpio_get_task, "gpio_get_task", 2048, &context, 10, NULL);
-    xTaskCreate(http_get_task, "http_get_task", 4096, &context, 20, NULL);
-    xTaskCreate(disp_put_task, "disp_put_task", 4096, &context, 20, NULL);
+    xTaskCreate(http_task, "http_task", 4096, &context, 20, NULL);
+    xTaskCreate(stat_task, "stat_task", 4096, &context, 20, &(context.stat_task_handle));
+    xTaskCreate(menu_task, "menu_task", 4096, &context, 20, &(context.menu_task_handle));
+
+    xTaskNotifyGive(context.stat_task_handle);
 }
