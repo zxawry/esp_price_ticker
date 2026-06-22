@@ -6,13 +6,19 @@
 
 #include <time.h>
 #include "esp_http_client.h"
-#include "esp_crt_bundle.h"
 #include "esp_log.h"
 #include "cJSON.h"
 
 #include "app_comm.h"
 
 static const char *TAG = "app_http";
+
+// root cert for the API server domain, taken from server_root_cert.pem
+// extracted from the output of this command:
+// `openssl s_client -showcerts -connect $DOMAIN_NAME:443`
+// the root cert is the last cert given in the chain of certs.
+extern const char server_root_cert_pem_start[] asm("_binary_server_root_cert_pem_start");
+extern const char server_root_cert_pem_end[]   asm("_binary_server_root_cert_pem_end");
 
 static esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 {
@@ -85,7 +91,8 @@ esp_err_t http_request(market_handle_t market_handle)
         .event_handler = _http_event_handler,
         .buffer_size = 2048,
         .user_data = market_handle,
-        .crt_bundle_attach = esp_crt_bundle_attach,
+        .cert_pem = server_root_cert_pem_start,
+        .cert_len = server_root_cert_pem_end - server_root_cert_pem_start,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
