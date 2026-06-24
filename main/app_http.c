@@ -22,30 +22,27 @@ extern const char server_root_cert_pem_end[]   asm("_binary_server_root_cert_pem
 
 static esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 {
-    static char *json_buffer;
-    static int json_size;
+    static char json_buffer[2048] = {0};
+    static int json_size = 0;
 
     market_handle_t market_handle = (market_handle_t)evt->user_data;
 
     switch (evt->event_id) {
     case HTTP_EVENT_ON_DATA:
         if (evt->data_len > 0) {
-            if (json_buffer == NULL) {
-                json_buffer = malloc(evt->data_len + 1);
-            } else {
-                json_buffer = realloc(json_buffer, json_size + evt->data_len + 1);
-            }
-            if (json_buffer == NULL) {
-                ESP_LOGE(TAG, "Failed to allocate memory for data json_buffer");
+            // check for buffer overflows and fail before it happens
+            if (json_size + evt->data_len > 2048) {
+                // discard written data so far
+                json_size = 0;
                 return ESP_FAIL;
             }
             memcpy(json_buffer + json_size, evt->data, evt->data_len);
             json_size += evt->data_len;
-            json_buffer[json_size] = '\0';  // Null-terminate the string
+            json_buffer[json_size] = '\0';  // null-terminate the string
         }
         break;
     case HTTP_EVENT_ON_FINISH:
-        if (json_buffer != NULL) {
+        if (json_size > 0) {
             // start processing data
             cJSON *root = cJSON_Parse(json_buffer);
             cJSON *status = cJSON_GetObjectItem(root, "status");
@@ -67,8 +64,6 @@ static esp_err_t _http_event_handler(esp_http_client_event_t *evt)
                 memcpy(market_handle->last_price, price->valuestring, strlen(price->valuestring));
             }
             cJSON_Delete(root);
-            free(json_buffer);
-            json_buffer = NULL;
             json_size = 0;
         }
         break;
