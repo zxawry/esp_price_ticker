@@ -28,53 +28,60 @@ static esp_err_t _http_event_handler(esp_http_client_event_t *evt)
     static char json_buffer[MAX_HTTP_BUFFER_SIZE] = {0};
     static int json_size = 0;
 
+    esp_err_t err = ESP_OK;
+
     market_handle_t market_handle = (market_handle_t)evt->user_data;
 
     switch (evt->event_id) {
-    case HTTP_EVENT_ON_DATA:
-        if (evt->data_len > 0) {
-            // check for buffer overflows and fail before it happens
-            if (json_size + evt->data_len > MAX_HTTP_BUFFER_SIZE) {
-                // discard written data so far
-                json_size = 0;
-                return ESP_FAIL;
+        case HTTP_EVENT_ON_DATA:
+            if (evt->data_len > 0) {
+                // check for buffer overflows and fail before it happens
+                if (json_size + evt->data_len > MAX_HTTP_BUFFER_SIZE) {
+                    // discard written data so far
+                    json_size = 0;
+                    err = ESP_FAIL;
+                } else {
+                    memcpy(json_buffer + json_size, evt->data, evt->data_len);
+                    json_size += evt->data_len;
+                    json_buffer[json_size] = '\0';  // null-terminate the string
+                }
             }
-            memcpy(json_buffer + json_size, evt->data, evt->data_len);
-            json_size += evt->data_len;
-            json_buffer[json_size] = '\0';  // null-terminate the string
-        }
-        break;
-    case HTTP_EVENT_ON_FINISH:
-        if (json_size > 0) {
-            // start processing data
-            cJSON *root = cJSON_Parse(json_buffer);
-            cJSON *status = cJSON_GetObjectItem(root, "status");
-            if (status == NULL || strcmp(status->valuestring, "ok") != 0) {
-                ESP_LOGE(TAG, "Unexpected parsed status = %s", status->valuestring);
-            } else { // status == "ok"
+            break;
+        case HTTP_EVENT_ON_FINISH:
+            if (json_size > 0) {
+                // just to be more memory safe
+                memset(market_handle->last_update, '\0', 16);
+                memset(market_handle->last_price, '\0', 16);
+                // start processing data
+                cJSON *root = cJSON_Parse(json_buffer);
+                if (root == NULL) {
+                    ESP_LOGE(TAG, "Failed at parsing JSON");
+                    err = ESP_FAIL;
+                    goto cleanup;
+                }
+                cJSON *status = cJSON_GetObjectItem(root, "status");
+                if (status == NULL || strcmp(status->valuestring, "ok") != 0) {
+                    ESP_LOGE(TAG, "Unexpected parsed status = %s", status->valuestring);
+                    err = ESP_FAIL;
+                    goto cleanup;
+                }
+                // status == "ok"
                 cJSON *trades = cJSON_GetObjectItem(root, "trades");
                 cJSON *latest_trade = cJSON_GetArrayItem(trades, 0);
                 cJSON *price = cJSON_GetObjectItem(latest_trade, "price");
                 cJSON *timestamp = cJSON_GetObjectItem(latest_trade, "time");
-
-                // just to be more memory safe
-                memset(market_handle->last_update, '\0', 16);
-                memset(market_handle->last_price, '\0', 16);
-
                 time_t seconds = (time_t) timestamp->valuedouble / 1000 + (35 * 360);
                 strftime(market_handle->last_update, strlen("HH:MM:SS") + 1, "%H:%M:%S", gmtime(&seconds));
-
                 memcpy(market_handle->last_price, price->valuestring, strlen(price->valuestring));
+cleanup:
+                cJSON_Delete(root);
+                json_size = 0;
             }
-            cJSON_Delete(root);
-            json_size = 0;
-        }
-        break;
-    default:
-        break;
+            break;
+        default:
+            break;
     }
-
-    return ESP_OK;
+    return err;
 }
 
 esp_err_t http_request(market_handle_t market_handle)
