@@ -11,6 +11,9 @@
 
 #include "app_comm.h"
 
+#define MAX_HTTP_TIMEOUT_MS 20000
+#define MAX_HTTP_BUFFER_SIZE 2048
+
 static const char *TAG = "app_http";
 
 // root cert for the API server domain, taken from server_root_cert.pem
@@ -22,7 +25,7 @@ extern const char server_root_cert_pem_end[]   asm("_binary_server_root_cert_pem
 
 static esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 {
-    static char json_buffer[2048] = {0};
+    static char json_buffer[MAX_HTTP_BUFFER_SIZE] = {0};
     static int json_size = 0;
 
     market_handle_t market_handle = (market_handle_t)evt->user_data;
@@ -31,7 +34,7 @@ static esp_err_t _http_event_handler(esp_http_client_event_t *evt)
     case HTTP_EVENT_ON_DATA:
         if (evt->data_len > 0) {
             // check for buffer overflows and fail before it happens
-            if (json_size + evt->data_len > 2048) {
+            if (json_size + evt->data_len > MAX_HTTP_BUFFER_SIZE) {
                 // discard written data so far
                 json_size = 0;
                 return ESP_FAIL;
@@ -82,9 +85,9 @@ esp_err_t http_request(market_handle_t market_handle)
     esp_http_client_config_t config = {
         .url = url,
         .method = HTTP_METHOD_GET,
-        .timeout_ms = 50000,
+        .timeout_ms = MAX_HTTP_TIMEOUT_MS,
         .event_handler = _http_event_handler,
-        .buffer_size = 2048,
+        .buffer_size = MAX_HTTP_BUFFER_SIZE,
         .user_data = market_handle,
         .cert_pem = server_root_cert_pem_start,
         .cert_len = server_root_cert_pem_end - server_root_cert_pem_start,
